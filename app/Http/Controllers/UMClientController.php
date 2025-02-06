@@ -6,6 +6,8 @@ use App\Models\UMClient;
 use App\Models\UMServer;
 use App\Services\MikroTikUMClientService;
 use Illuminate\Http\Request;
+use App\Events\CreateRadiusOnUMClient;
+use Illuminate\Support\Facades\Log;
 
 class UMClientController extends Controller
 {
@@ -19,12 +21,9 @@ class UMClientController extends Controller
     // List all UM Clients
     public function show_list_umclient()
     {
-        $clients = UMClient::all();
         $umServers = UMServer::all();
-        $clients = UMClient::with('umServer')->get();
-
-
-        return view('admin.networking.ip_networking.bb_umclient', compact('clients','umServers'));
+        $umClients = UMClient::with('umServer')->paginate(10); 
+        return view('admin.networking.ip_networking.bb_umclient', compact('umClients'));
     }
 
     // Show form to create a UM Client
@@ -112,29 +111,38 @@ class UMClientController extends Controller
     }
 
     // Send configuration to MikroTik for all UM Clients
-    public function umclients_sendConfiguration(Request $request)
-{
-    $umClient = UMClient::findOrFail($request->client_id);
-
-    try {
-        // Create an instance of the service
-        $mikroTikService = new MikroTikUMClientService();
-
-        // Call the `sendConfiguration` instance method
-        $mikroTikService->sendConfiguration($umClient);
-
-        // Perform ping check to verify if the client is online
-        if ($this->pingIPAddress($umClient->ip_address)) {
-            $umClient->update(['status' => 'Online']);
-        } else {
-            $umClient->update(['status' => 'Offline']);
+    public function umclients_sendConfiguration(Request $request, MikroTikUMClientService $mikroTikService)
+    {
+        $clientId = $request->input('client_id');
+    
+        if (!$clientId) {
+            return redirect()->back()->with('error', 'No client selected.');
         }
-
-        return redirect()->route('show_list_umclients')->with('success', 'Configuration sent successfully.');
-    } catch (\Exception $e) {
-        return redirect()->back()->with('error', 'Failed to send configuration: ' . $e->getMessage());
+    
+        $umClient = UMClient::with('umServer')->findOrFail($clientId);
+    
+        try {
+            // Add router to the UM server
+            $mikroTikService->createRadiusClientOnUMServer($umClient);
+    
+            // Configure RADIUS server on the UM client
+            $mikroTikService->configureRadiusServerOnUMClient($umClient);
+    
+            // Check connectivity by pinging the UM client's IP address
+            if ($this->pingIPAddress($umClient->ip_address)) {
+                $umClient->update(['status' => 'Online']);
+            } else {
+                $umClient->update(['status' => 'Offline']);
+            }
+    
+            return redirect()->route('show_list_umclients')->with('success', 'Configuration sent successfully.');
+        } catch (\Exception $e) {
+            Log::error("Error sending configuration: " . $e->getMessage());
+            return redirect()->back()->with('error', 'Failed to send configuration: ' . $e->getMessage());
+        }
     }
-}
+    
+    
 
 /**
  * Ping an IP address to check its availability.

@@ -64,7 +64,7 @@
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            @foreach($clients as $client)
+                                            @foreach($umClients as $client)
                                                 <tr>
                                                     <td>{{ $client->id }}</td>
                                                     <td>{{ $client->client_name }}</td>
